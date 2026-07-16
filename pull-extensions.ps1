@@ -14,11 +14,21 @@
 # they never abort the rest of the run.
 #
 # Reload behavior (only for Reload=$true repos that changed):
-#   - Chrome open   -> sends Extensions Reloader hotkey (Alt+Shift+R), no tab
+#   - Chrome open   -> briefly focuses Chrome, sends the Extensions Reloader
+#                      keyboard command, then hands focus back. No tab is opened.
 #   - Chrome closed -> launches Chrome (a fresh start loads updated files itself)
 #
-# Requires the "Extensions Reloader" extension (by Arik W) with its command set
-# to Alt+Shift+R (default - verify at chrome://extensions/shortcuts).
+# Why a hotkey and not http://reload.extensions: on the current Manifest V3
+# extension that URL trigger is unreliable - the background service worker sleeps
+# after ~30s and (because MV3 can't block the request) just navigates to the dead
+# URL, so it "frequently does nothing / just refreshes the page." A keyboard
+# command reliably wakes the worker, so the reload actually fires every run.
+#
+# Requires the "Extensions Reloader" extension (by Arik W). ONE-TIME SETUP: at
+# chrome://extensions/shortcuts set its "Reload all extensions in development"
+# command to the combo in $ReloadHotkey below. Do NOT leave it on the default
+# Alt+Shift+R - that collides with Chrome's built-in Reading Mode (which is why
+# the old hotkey misfired).
 # Note: manifest.json changes are NOT picked up by the reload - those need a
 # real reload from chrome://extensions or a Chrome restart.
 
@@ -52,6 +62,14 @@ $Repos = @(
 
 # Master switch for the Chrome step. $false = never reload/launch Chrome at all.
 $ReloadExtensions = $true
+
+# The keyboard shortcut you assigned to "Extensions Reloader" at
+# chrome://extensions/shortcuts (see the one-time setup note at the top). Pick any
+# free combo EXCEPT Alt+Shift+R (Chrome Reading Mode). If you change it in Chrome,
+# change both values here to match.
+#   SendKeys codes:  ^ = Ctrl   + = Shift   % = Alt   (letters are literal)
+$ReloadHotkey      = "%+e"          # Alt+Shift+E
+$ReloadHotkeyLabel = "Alt+Shift+E"  # human-readable, only shown in messages
 # ================================================================
 
 function Get-ChromePath {
@@ -69,17 +87,37 @@ function Invoke-ExtensionReload {
             Select-Object -First 1
 
     if ($proc) {
+        # Chrome open: fire the Extensions Reloader keyboard command. Delivering a
+        # command wakes the MV3 service worker, so the reload actually runs. We
+        # briefly focus Chrome to send the keys, then hand focus back to whatever
+        # window had it so this doesn't steal your place.
         try {
             Add-Type -AssemblyName System.Windows.Forms
+            if (-not ('FgWin' -as [type])) {
+                Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class FgWin {
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+}
+"@
+            }
+            $prev = [FgWin]::GetForegroundWindow()
+
             $wshell = New-Object -ComObject WScript.Shell
             $null = $wshell.AppActivate($proc.Id)   # focus Chrome
-            Start-Sleep -Milliseconds 600
-            [System.Windows.Forms.SendKeys]::SendWait("%+r")   # Alt+Shift+R
-            Write-Host "Sent reload hotkey to Chrome." -ForegroundColor DarkGray
+            Start-Sleep -Milliseconds 500
+            [System.Windows.Forms.SendKeys]::SendWait($ReloadHotkey)
+            Start-Sleep -Milliseconds 200
+
+            if ($prev -ne [IntPtr]::Zero) { [void][FgWin]::SetForegroundWindow($prev) }   # restore focus
+            Write-Host "Sent reload hotkey ($ReloadHotkeyLabel) to Chrome." -ForegroundColor DarkGray
         } catch {
-            Write-Host "Couldn't send the reload hotkey - reload manually (Alt+Shift+R or the toolbar button)." -ForegroundColor Yellow
+            Write-Host "Couldn't send the reload hotkey - reload manually ($ReloadHotkeyLabel or the toolbar button)." -ForegroundColor Yellow
         }
     } else {
+        # Chrome closed: a fresh start already loads the updated files.
         $chrome = Get-ChromePath
         try {
             if ($chrome) { Start-Process $chrome } else { Start-Process "chrome" }
@@ -159,7 +197,7 @@ foreach ($pa in $postActions) {
 
 Write-Host ""
 if ($ReloadExtensions -and $reloadNeeded) {
-    Write-Host "Applying the update in Chrome (don't grab focus for ~1s) ..." -ForegroundColor Cyan
+    Write-Host "Applying the update in Chrome (reload hotkey $ReloadHotkeyLabel) ..." -ForegroundColor Cyan
     Invoke-ExtensionReload
 } elseif ($updated.Count -gt 0) {
     Write-Host "Updated - nothing needed a Chrome reload." -ForegroundColor DarkGray

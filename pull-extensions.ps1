@@ -47,6 +47,12 @@ $Repos = @(
     @{ URL="https://github.com/zrcoderre-ux/E-Court.git"; Path = "C:\Users\ZCoderre\Chrome Extensions\E-Court"; Reload = $true }
     @{ URL="https://github.com/zrcoderre-ux/Claude.git"; Path = "C:\Users\ZCoderre\Chrome Extensions\Claude"; Reload = $true }
 
+    # This tool itself: C:\Users\ZCoderre\scripts is a clone of this repo, so the
+    # pull keeps pull-extensions.ps1/.bat current. The update applies on the NEXT
+    # run (PowerShell has already loaded the copy that's currently executing).
+    # Reload=$false - it never touches Chrome.
+    @{ Url = "https://github.com/zrcoderre-ux/Github-Refresh.git"; Path = "C:\Users\ZCoderre\scripts"; Reload = $false }
+
     # Word macro template. Reload=$false (it never touches Chrome). On update,
     # the OnUpdate hook rebuilds My_Macros.dotm from src and hot-swaps it into a
     # running Word. SET THE TWO VALUES BELOW: the repo URL and your local Path.

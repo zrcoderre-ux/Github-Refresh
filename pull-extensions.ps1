@@ -12,6 +12,9 @@
 # local path as its one argument. Used here to rebuild the Word macro template
 # from its text source after a pull. Failures in a hook are caught and reported;
 # they never abort the rest of the run.
+# Before any hook runs, lingering *background* Word instances (windowless/orphaned
+# WINWORD.EXE that can keep My_Macros.dotm locked) are closed so the rebuild can
+# overwrite the file. A visible Word window you're working in is left untouched.
 #
 # Reload behavior (only for Reload=$true repos that changed):
 #   - Chrome open   -> briefly focuses Chrome, sends the Extensions Reloader
@@ -128,6 +131,24 @@ public static class FgWin {
     }
 }
 
+function Close-BackgroundWord {
+    # Close ONLY windowless / orphaned Word instances - the leftover automation
+    # processes that hold My_Macros.dotm locked. A Word window you actually have
+    # open (MainWindowHandle -ne 0) is left alone, so you never lose unsaved work.
+    $bg = Get-Process WINWORD -ErrorAction SilentlyContinue |
+          Where-Object { $_.MainWindowHandle -eq 0 }
+    if (-not $bg) { return }
+    foreach ($p in $bg) {
+        try {
+            Stop-Process -Id $p.Id -Force -ErrorAction Stop
+            Write-Host "  Closed background Word (PID $($p.Id))." -ForegroundColor DarkGray
+        } catch {
+            Write-Host "  Couldn't close background Word (PID $($p.Id)): $_" -ForegroundColor Yellow
+        }
+    }
+    Start-Sleep -Milliseconds 500   # give Windows a moment to release the file lock
+}
+
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     Write-Host "ERROR: git is not installed or not on PATH." -ForegroundColor Red
     Write-Host "Install it from https://git-scm.com/download/win then re-run." -ForegroundColor Red
@@ -187,7 +208,9 @@ if ($updated.Count) { Write-Host ("  Updated -> " + ($updated -join ", ")) -Fore
 if ($failed.Count)  { Write-Host ("  Failed  -> " + ($failed  -join ", ")) -ForegroundColor Yellow }
 
 # Run any post-update hooks (e.g. rebuild the Word macro template). Each is
-# isolated so a failure reports and moves on without aborting the run.
+# isolated so a failure reports and moves on without aborting the run. Close any
+# background Word first so a locked My_Macros.dotm can't block the rebuild.
+if ($postActions.Count) { Close-BackgroundWord }
 foreach ($pa in $postActions) {
     Write-Host ""
     Write-Host "==> post-update: $($pa.Name)" -ForegroundColor Cyan

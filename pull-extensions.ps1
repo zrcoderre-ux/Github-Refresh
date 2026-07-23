@@ -42,7 +42,6 @@ $Repos = @(
     @{ Url = "https://github.com/zrcoderre-ux/pdf-viewer.git";   Path = "C:\Users\ZCoderre\Chrome Extensions\PDF Viewer"; Reload = $true }
     @{ Url = "https://github.com/zrcoderre-ux/Cross-Opener.git";   Path = "C:\Users\ZCoderre\Chrome Extensions\Cross-Opener"; Reload = $true }
     @{ Url = "https://github.com/zrcoderre-ux/PDF-Linker.git"; Path = "C:\Users\ZCoderre\Apps\PDF Linker"; Reload = $false }
-    @{ Url = "https://github.com/zrcoderre-ux/PDF-Redactor.git"; Path = "C:\Users\ZCoderre\Apps\PDF Redactor"; Reload = $false }
     @{ Url = "https://github.com/zrcoderre-ux/workup-search.git"; Path = "C:\Users\ZCoderre\Apps\Workup Search"; Reload = $false }
     @{ URL="https://github.com/zrcoderre-ux/E-Court.git"; Path = "C:\Users\ZCoderre\Chrome Extensions\E-Court"; Reload = $true }
     @{ URL="https://github.com/zrcoderre-ux/Claude.git"; Path = "C:\Users\ZCoderre\Chrome Extensions\Claude"; Reload = $true }

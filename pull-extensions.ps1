@@ -12,6 +12,10 @@
 # local path as its one argument. Used here to rebuild the Word macro template
 # from its text source after a pull. Failures in a hook are caught and reported;
 # they never abort the rest of the run.
+# Before any hook runs, a running Word is closed so the rebuild can overwrite the
+# locked My_Macros.dotm: open documents are saved first via COM and Word is quit
+# cleanly (no lost work), then any leftover windowless/orphaned WINWORD.EXE that a
+# COM quit can't reach is force-closed.
 #
 # Reload behavior (only for Reload=$true repos that changed):
 #   - Chrome open   -> briefly focuses Chrome, sends the Extensions Reloader
@@ -128,6 +132,54 @@ public static class FgWin {
     }
 }
 
+function Close-Word {
+    # An open Word keeps My_Macros.dotm locked, which blocks the template rebuild.
+    # First gracefully save + quit a running Word via COM so nothing is lost (you
+    # usually close it yourself; this is the safety net). Then force-close any
+    # leftover windowless / orphaned WINWORD.EXE that a COM quit can't reach.
+    $acted = $false
+
+    # 1) Save open documents, then quit, via COM (Windows PowerShell / .NET
+    #    Framework only - the .bat launches powershell.exe, so this is fine).
+    $word = $null
+    try { $word = [Runtime.InteropServices.Marshal]::GetActiveObject("Word.Application") }
+    catch { }   # GetActiveObject throws when no Word is running - nothing to do
+    if ($word) {
+        try {
+            $word.DisplayAlerts = 0   # wdAlertsNone - never stop on a save dialog
+            foreach ($doc in @($word.Documents)) {
+                try {
+                    if ($doc.Path -ne '') { $doc.Save() }   # save docs already on disk
+                    else { $doc.Saved = $true }             # unnamed scratch doc: let Word quit
+                } catch { Write-Host "  Couldn't save '$($doc.Name)': $_" -ForegroundColor Yellow }
+            }
+            $word.Quit()
+            $acted = $true
+            Write-Host "  Saved open documents and closed Word." -ForegroundColor DarkGray
+        } catch {
+            Write-Host "  Couldn't cleanly quit Word: $_" -ForegroundColor Yellow
+        } finally {
+            [void][Runtime.InteropServices.Marshal]::ReleaseComObject($word)
+            $word = $null
+        }
+    }
+
+    # 2) Force-close any windowless Word still lingering (orphans COM can't reach).
+    $bg = Get-Process WINWORD -ErrorAction SilentlyContinue |
+          Where-Object { $_.MainWindowHandle -eq 0 }
+    foreach ($p in $bg) {
+        try {
+            Stop-Process -Id $p.Id -Force -ErrorAction Stop
+            $acted = $true
+            Write-Host "  Closed background Word (PID $($p.Id))." -ForegroundColor DarkGray
+        } catch {
+            Write-Host "  Couldn't close background Word (PID $($p.Id)): $_" -ForegroundColor Yellow
+        }
+    }
+
+    if ($acted) { Start-Sleep -Milliseconds 500 }   # give Windows a moment to release the lock
+}
+
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     Write-Host "ERROR: git is not installed or not on PATH." -ForegroundColor Red
     Write-Host "Install it from https://git-scm.com/download/win then re-run." -ForegroundColor Red
@@ -187,7 +239,9 @@ if ($updated.Count) { Write-Host ("  Updated -> " + ($updated -join ", ")) -Fore
 if ($failed.Count)  { Write-Host ("  Failed  -> " + ($failed  -join ", ")) -ForegroundColor Yellow }
 
 # Run any post-update hooks (e.g. rebuild the Word macro template). Each is
-# isolated so a failure reports and moves on without aborting the run.
+# isolated so a failure reports and moves on without aborting the run. Save + quit
+# any running Word first so a locked My_Macros.dotm can't block the rebuild.
+if ($postActions.Count) { Close-Word }
 foreach ($pa in $postActions) {
     Write-Host ""
     Write-Host "==> post-update: $($pa.Name)" -ForegroundColor Cyan
